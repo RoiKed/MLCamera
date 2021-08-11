@@ -21,8 +21,21 @@ class CameraViewController: UIViewController {
     
     private var detector: Detector?
     private let recorder = RPScreenRecorder.shared()
-    private var captureDevice: AVCaptureDevice?
-    private var image: UIImage?
+    private var backCamera: AVCaptureDevice!
+    private var frontCamera : AVCaptureDevice!
+    private var backInput : AVCaptureInput!
+    private var frontInput : AVCaptureInput!
+    var backCameraOn = true
+    
+    let switchCameraButton : UIButton = {
+        let button = UIButton()
+        let image = UIImage(named: "switchcamera")?.withRenderingMode(.alwaysTemplate)
+        button.setImage(image, for: .normal)
+        button.tintColor = .white
+        button.translatesAutoresizingMaskIntoConstraints = false
+        
+        return button
+    }()
     
     let recordButton : UIButton = {
         let button = UIButton()
@@ -73,6 +86,26 @@ class CameraViewController: UIViewController {
         }
     }
     
+    func switchCameraInput() {
+        switchCameraButton.isUserInteractionEnabled = false
+        //reconfigure the input
+        captureSession.beginConfiguration()
+        if backCameraOn {
+            captureSession.removeInput(backInput)
+            captureSession.addInput(frontInput)
+            backCameraOn = false
+        } else {
+            captureSession.removeInput(frontInput)
+            captureSession.addInput(backInput)
+            backCameraOn = true
+        }
+        
+        videoOutput.connections.first?.videoOrientation = .portrait
+        videoOutput.connections.first?.isVideoMirrored = false
+        captureSession.commitConfiguration()
+        switchCameraButton.isUserInteractionEnabled = true
+    }
+    
     
     //MARK:- Private methods
     
@@ -92,13 +125,8 @@ class CameraViewController: UIViewController {
     }
     
     private func setCamera() {
-        guard let captureDevice = AVCaptureDevice.default(for: .video) else { return }
-        self.captureDevice = captureDevice
-        
-        guard let input = try? AVCaptureDeviceInput(device: captureDevice) else { return }
-        if captureSession.canAddInput(input) {
-            captureSession.addInput(input)
-        }
+        setupInputs()
+        setCameraButton()
         setRecordButton()
         setPreviewLayer()
 
@@ -107,9 +135,67 @@ class CameraViewController: UIViewController {
         }
     }
     
+    private func setupInputs() {
+        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+            backCamera = device
+            setupCamera(camera: backCamera)
+        } else {
+            fatalError("no back camera")
+        }
+        
+        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) {
+            frontCamera = device
+        } else {
+            fatalError("no front camera")
+        }
+        
+        guard let backInput = try? AVCaptureDeviceInput(device: backCamera) else {
+            fatalError("could not create input device from back camera")
+        }
+        self.backInput = backInput
+        guard let frontInput = try? AVCaptureDeviceInput(device: frontCamera) else {
+            fatalError("could not create input device from front camera")
+        }
+        self.frontInput = frontInput
+        
+        if !captureSession.canAddInput(frontInput) {
+            fatalError("could not add front camera input to capture session")
+        }
+        if captureSession.canAddInput(backInput) {
+            captureSession.addInput(backInput)
+        } else {
+            fatalError("could not add back camera input to capture session")
+        }
+    }
+    
+    private func setupCamera(camera:AVCaptureDevice) {
+        try? camera.lockForConfiguration()
+        if camera.isFocusModeSupported(.continuousAutoFocus) {
+            camera.focusMode = .continuousAutoFocus
+            camera.videoZoomFactor = 1
+            camera.unlockForConfiguration()
+        }
+    }
+    
     private func setDetector() {
         detector = Detector.shared
         detector?.delegate = self
+    }
+    
+    private func setCameraButton() {
+        view.addSubview(switchCameraButton)
+        NSLayoutConstraint.activate([
+            switchCameraButton.widthAnchor.constraint(equalToConstant: 30),
+            switchCameraButton.heightAnchor.constraint(equalToConstant: 30),
+            switchCameraButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            switchCameraButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10)
+        ])
+        
+        switchCameraButton.addTarget(self, action: #selector(switchCamera(_:)), for: .touchUpInside)
+    }
+    
+    @objc func switchCamera(_ sender: UIButton?){
+        switchCameraInput()
     }
     
     private func setRecordButton() {
